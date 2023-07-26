@@ -261,7 +261,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
 
     let mut last_note = None;
 
-    let client = Client::builder().gzip(true).deflate(true).brotli(true).build().expect("panic");
+    let client = Client::builder().gzip(true).deflate(true).brotli(true)
+        .use_rustls_tls()
+        .build()
+        .expect("panic");
     loop {
         let send = ChannelTimelineCommand {
             channel_id: arg.channel_id.clone(),
