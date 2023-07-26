@@ -356,6 +356,8 @@ struct DetailedUser {
     #[serde(rename = "avatarUrl")]
     /// 現在のアイコンのURL
     icon_url: Url,
+    #[serde(rename = "notesCount")]
+    total_notes: usize,
 }
 
 impl UserDetailCommand {
