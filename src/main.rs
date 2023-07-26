@@ -8,15 +8,15 @@ use std::error::Error;
 use std::fmt::{Debug, Formatter, Write};
 use std::num::NonZeroUsize;
 use std::str::FromStr;
-use std::sync::Arc;
+
 use std::time::Duration;
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use lazy_regex::Lazy;
-use regex_lite::Regex;
+
 use reqwest::Client;
 use serde::{Serialize, Deserialize, Deserializer, Serializer};
-use serde::de::{Error as _};
+
 use tokio::time::sleep;
 
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize)]
@@ -191,7 +191,7 @@ impl<'de> Deserialize<'de> for CanonicalEmojiKey {
             // TODO: おそらくこの再アロケーションは避けられる
             let name = EmojiName(raw[name_range].to_owned());
 
-            Ok(CanonicalEmojiKey::Custom {
+            Ok(Self::Custom {
                 name,
                 host: LocalOnly,
             })
@@ -200,7 +200,7 @@ impl<'de> Deserialize<'de> for CanonicalEmojiKey {
             emojis::iter().find(|x| x.as_str() == &raw).ok_or(
                 serde::de::Error::custom("emoji repr must match custom emoji or an Unicode codepoint of emoji")
             ).map(|found| {
-                CanonicalEmojiKey::Unicode {
+                Self::Unicode {
                     utf8: found.to_string()
                 }
             })
@@ -211,10 +211,10 @@ impl<'de> Deserialize<'de> for CanonicalEmojiKey {
 impl Serialize for CanonicalEmojiKey {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
         match self {
-            CanonicalEmojiKey::Unicode { utf8 } => {
-                serializer.serialize_str(&utf8)
+            Self::Unicode { utf8 } => {
+                serializer.serialize_str(utf8)
             }
-            CanonicalEmojiKey::Custom { name, .. } => {
+            Self::Custom { name, .. } => {
                 let s = format!(":{}@.:", name.0);
                 serializer.serialize_str(&s)
             }
