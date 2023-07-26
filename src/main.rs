@@ -84,6 +84,8 @@ struct Args {
     token: MisskeyAuthorizationToken,
     #[clap(long)]
     channel_id: ChannelId,
+    #[clap(long, long = "cool-down")]
+    cool_down_millisecond: Option<NonZeroUsize>,
 }
 
 #[derive(Serialize)]
@@ -258,7 +260,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
         println!(r#"{{ "kind": "log", "message": "proceeded by {last_note}"}}"#, last_note = last_note.expect("must be Some").0);
         println!("{}", serde_json::to_string(&result)?);
 
-        sleep(Duration::new(10, 0)).await;
+        let sleep_sec = arg.cool_down_millisecond.map(|x| x.get() / 1000).unwrap_or(0) as u64;
+        let sleep_nano = arg.cool_down_millisecond.map(|x| x.get() as u64 - sleep_sec * 1000).unwrap_or(0) as u32 * 1_000_000;
+        println!(r#"{{ "kind": "log", "message": "sleep" }}"#);
+        sleep(Duration::new(sleep_sec, sleep_nano)).await;
     }
 
     Ok(())
