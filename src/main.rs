@@ -121,11 +121,14 @@ impl ChannelTimelineCommand {
         let status = x.status();
         let text = x.text().await?;
 
-        let Ok(json) = serde_json::from_str(&text) else {
-            eprintln!("ERROR: deserialize failed.");
-            eprintln!("raw: {text}", text = text);
-            eprintln!("status: {status}");
-            panic!("1");
+        let json = match serde_json::from_str(&text) {
+            Ok(x) => x,
+            Err(e) => {
+                eprintln!("ERROR: deserialize failed.");
+                eprintln!("raw: {text}", text = text);
+                eprintln!("status: {status}");
+                panic!("{e:?}");
+            }
         };
         Ok(json)
     }
