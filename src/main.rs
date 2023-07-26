@@ -77,6 +77,7 @@ impl FromStr for MisskeyAuthorizationToken {
 #[derive(Eq, PartialEq, Parser)]
 struct Args {
     #[clap(long)]
+    /// どこから遡るか。ない場合は実行時点の最新のノートから。
     before: Option<NoteId>,
     #[clap(long)]
     host: String,
@@ -85,6 +86,7 @@ struct Args {
     #[clap(long)]
     channel_id: ChannelId,
     #[clap(long, long = "cool-down")]
+    /// リクエストの間隔をミリ秒で指定。
     cool_down_millisecond: Option<NonZeroUsize>,
 }
 
