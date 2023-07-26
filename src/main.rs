@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use lazy_regex::Lazy;
 
-use reqwest::Client;
+use reqwest::{Client, Method, Request, RequestBuilder};
 use serde::{Serialize, Deserialize, Deserializer, Serializer};
 
 use tokio::time::sleep;
@@ -116,10 +116,10 @@ impl ChannelTimelineCommand {
             body: self,
         };
         eprintln!("{}", serde_json::to_string(&wtr).unwrap());
-        let x = HTTP_CLIENT.post(format!("https://{host}/api/channels/timeline")).json(&wtr).build()?;
-
-        let x = HTTP_CLIENT.execute(x).await?;
-
+        let x = HTTP_CLIENT.request(Method::POST, format!("https://{host}/api/channels/timeline"))
+            .json(&wtr)
+            .send()
+            .await?;
         let status = x.status();
         let text = x.text().await?;
 
