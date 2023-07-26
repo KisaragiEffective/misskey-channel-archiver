@@ -110,13 +110,13 @@ struct WithTokenRef<'a, T> {
 }
 
 impl ChannelTimelineCommand {
-    async fn send(self, HTTP_CLIENT: &Client, host: String, misskey_token: &MisskeyAuthorizationToken) -> Result<Vec<Note>, Box<dyn Error + Send + Sync>> {
+    async fn send(self, http_client: &Client, host: String, misskey_token: &MisskeyAuthorizationToken) -> Result<Vec<Note>, Box<dyn Error + Send + Sync>> {
         let wtr = WithTokenRef {
             token: misskey_token,
             body: self,
         };
         eprintln!("{}", serde_json::to_string(&wtr).unwrap());
-        let x = HTTP_CLIENT.request(Method::POST, format!("https://{host}/api/channels/timeline"))
+        let x = http_client.request(Method::POST, format!("https://{host}/api/channels/timeline"))
             .json(&wtr)
             .send()
             .await?;
