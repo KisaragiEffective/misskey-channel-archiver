@@ -172,20 +172,25 @@ struct PartialUser {
 
 #[derive(Eq, PartialEq, Hash)]
 enum CanonicalEmojiKey {
+    SingleCodepointPunctuation(char),
+    BoxedSingleDigit {
+        digit: u8,
+    },
     Unicode {
         utf8: String,
     },
     Custom {
         name: EmojiName,
         host: LocalOnly,
-    }
+    },
+    Uncategorized(String),
 }
 
 impl<'de> Deserialize<'de> for CanonicalEmojiKey {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         let raw = String::deserialize(deserializer)?;
         // ヒント: もしこれがエラーに見えているならIntelliJがおかしい
-        static PAT: Lazy<lazy_regex::Regex> = lazy_regex::lazy_regex!(r#"^:([a-z0-9_]+)@\.:$"#);
+        static PAT: Lazy<lazy_regex::Regex> = lazy_regex::lazy_regex!(r#"^:([a-z0-9_-]+)@\.:$"#);
 
         if let Some(captures) = PAT.captures(&raw) {
             let m = captures;
@@ -197,15 +202,18 @@ impl<'de> Deserialize<'de> for CanonicalEmojiKey {
                 name,
                 host: LocalOnly,
             })
-        } else {
+        } else if let Some(emoji) = emojis::iter().find(|x| x.as_str() == &raw) {
             // 絵文字は単にUnicodeの「文字」であることもある
-            emojis::iter().find(|x| x.as_str() == &raw).ok_or(
-                serde::de::Error::custom("emoji repr must match custom emoji or an Unicode codepoint of emoji")
-            ).map(|found| {
-                Self::Unicode {
-                    utf8: found.to_string()
-                }
+            Ok(Self::Unicode {
+                utf8: emoji.to_string()
             })
+        } else if raw.chars().next().expect("must not be empty").is_ascii_digit() && raw.chars().nth(1).expect("ow") == '\u{20e3}' {
+            Ok(Self::BoxedSingleDigit {
+                // Unicodeでは0-9は一列に並んでいるのでオフセットは引き算するだけで求められる
+                digit: u8::try_from(raw.chars().next().expect("1") as u32 - '0' as u32).expect("oops"),
+            })
+        } else {
+            Ok(Self::Uncategorized(raw))
         }
     }
 }
@@ -218,6 +226,15 @@ impl Serialize for CanonicalEmojiKey {
             }
             Self::Custom { name, .. } => {
                 let s = format!(":{}@.:", name.0);
+                serializer.serialize_str(&s)
+            }
+            Self::SingleCodepointPunctuation(c) => {
+                serializer.serialize_char(*c)
+            }
+            Self::BoxedSingleDigit { digit } => {
+                serializer.serialize_str(&format!("{digit}\u{20e3}"))
+            }
+            Self::Uncategorized(s) => {
                 serializer.serialize_str(&s)
             }
         }
