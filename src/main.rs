@@ -266,7 +266,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
         let send = ChannelTimelineCommand {
             channel_id: arg.channel_id.clone(),
             limit: 60.try_into().unwrap(),
-            note_after: None,
+            note_after: arg.after.clone(),
             note_before: last_note.clone(),
             date_after: None,
             date_before: None,
