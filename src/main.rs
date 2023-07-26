@@ -337,6 +337,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
 
 #[derive(Eq, PartialEq, Serialize)]
 struct UserDetailCommand {
+    #[serde(rename = "userId")]
     id: UserId,
 }
 
@@ -344,7 +345,8 @@ struct UserDetailCommand {
 struct DetailedUser {
     id: UserId,
     #[serde(rename = "name")]
-    screen_name: String,
+    /// スクリーンネームを設定していない場合は[`None`]。その場合、見える文字列はmentionであるべき。
+    screen_name: Option<String>,
     #[serde(rename = "username")]
     mention: String,
     #[serde(rename = "isBot")]
