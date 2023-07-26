@@ -152,7 +152,9 @@ struct Note {
     reply_to: Option<NoteId>,
     #[serde(rename = "renoteId")]
     renote_on: Option<NoteId>,
+    #[serde(rename = "renoteCount")]
     renote_count: usize,
+    #[serde(rename = "repliesCount")]
     reply_count: usize,
     reactions: HashMap<CanonicalEmojiKey, NonZeroUsize>,
 }
