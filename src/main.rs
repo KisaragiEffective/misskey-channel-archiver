@@ -2,7 +2,7 @@
 #![warn(clippy::pedantic, clippy::nursery)]
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::{Debug, Formatter, Write};
@@ -15,6 +15,7 @@ use clap::Parser;
 use lazy_regex::Lazy;
 
 use reqwest::{Client, Method, Request, RequestBuilder};
+use url::Url;
 use serde::{Serialize, Deserialize, Deserializer, Serializer};
 
 use tokio::time::sleep;
@@ -41,7 +42,7 @@ impl FromStr for ChannelId {
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Deserialize, Serialize)]
+#[derive(Eq, PartialEq, Clone, Hash, Deserialize, Serialize)]
 struct UserId(String);
 
 impl FromStr for UserId {
@@ -75,22 +76,35 @@ impl FromStr for MisskeyAuthorizationToken {
 }
 
 #[derive(Eq, PartialEq, Parser)]
-struct Args {
-    #[clap(long)]
-    /// どこから遡るか。ない場合は実行時点の最新のノートから。
-    before: Option<NoteId>,
-    #[clap(long)]
-    /// どこまで遡るか。ない場合は実行時点の最古のノートまで。
-    after: Option<NoteId>,
-    #[clap(long)]
-    host: String,
-    #[clap(long)]
-    token: MisskeyAuthorizationToken,
-    #[clap(long)]
-    channel_id: ChannelId,
-    #[clap(long, long = "cool-down")]
-    /// リクエストの間隔をミリ秒で指定。
-    cool_down_millisecond: Option<NonZeroUsize>,
+enum Args {
+    Archive {
+        #[clap(long)]
+        /// どこから遡るか。ない場合は実行時点の最新のノートから。
+        before: Option<NoteId>,
+        #[clap(long)]
+        /// どこまで遡るか。ない場合は実行時点の最古のノートまで。
+        after: Option<NoteId>,
+        #[clap(long)]
+        host: String,
+        #[clap(long)]
+        token: MisskeyAuthorizationToken,
+        #[clap(long)]
+        channel_id: ChannelId,
+        #[clap(long, long = "cool-down")]
+        /// リクエストの間隔をミリ秒で指定。
+        cool_down_millisecond: Option<NonZeroUsize>,
+    },
+    FetchUser {
+        #[clap(long)]
+        user: Vec<UserId>,
+        #[clap(long)]
+        host: String,
+        #[clap(long)]
+        token: MisskeyAuthorizationToken,
+        #[clap(long, long = "cool-down")]
+        /// リクエストの間隔をミリ秒で指定。
+        cool_down_millisecond: Option<NonZeroUsize>,
+    },
 }
 
 #[derive(Serialize)]
@@ -171,7 +185,7 @@ struct Note {
 
 #[derive(Deserialize, Serialize)]
 struct PartialUser {
-    // NOTE: Userのディスプレイネームはあとで取得する
+    // NOTE: その他のプロパティを捨てているのは下流側の正規化が面倒になるため
     id: UserId,
 }
 
@@ -258,40 +272,115 @@ struct MisskeyFlavoredMarkdown(String);
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
     let arg = Args::parse();
-
-    let mut last_note = None;
-
     let client = Client::builder().gzip(true).deflate(true).brotli(true)
         .use_rustls_tls()
         .build()
         .expect("panic");
-    loop {
-        let send = ChannelTimelineCommand {
-            channel_id: arg.channel_id.clone(),
-            limit: 60.try_into().unwrap(),
-            note_after: arg.after.clone(),
-            note_before: last_note.clone(),
-            date_after: None,
-            date_before: None,
-        };
 
-        let result = send.send(&client, arg.host.clone(), &arg.token).await?;
+    match arg {
+        Args::Archive { before, after, host, token, channel_id, cool_down_millisecond } => {
+            let mut last_note = None;
 
-        if result.is_empty() {
-            break
+            let mut users = HashSet::with_capacity(100);
+
+            loop {
+                let send = ChannelTimelineCommand {
+                    channel_id: channel_id.clone(),
+                    limit: 60.try_into().unwrap(),
+                    note_after: after.clone(),
+                    note_before: last_note.clone(),
+                    date_after: None,
+                    date_before: None,
+                };
+
+                let result = send.send(&client, host.clone(), &token).await?;
+
+                if result.is_empty() {
+                    break
+                }
+
+                last_note = result.iter().min_by_key(|x| x.created_at).map(|x| x.id.clone());
+                println!(r#"{{ "kind": "log", "message": "proceeded by {last_note}"}}"#, last_note = last_note.clone().expect("must be Some").0);
+                println!("{}", serde_json::to_string(&result)?);
+                users.extend(result.into_iter().map(|n| n.user.id));
+
+                let sleep_sec = cool_down_millisecond.map(|x| x.get() / 1000).unwrap_or(0) as u64;
+                let sleep_nano = cool_down_millisecond.map(|x| x.get() as u64 - sleep_sec * 1000).unwrap_or(0) as u32 * 1_000_000;
+                println!(r#"{{ "kind": "log", "message": "sleep" }}"#);
+                sleep(Duration::new(sleep_sec, sleep_nano)).await;
+            }
         }
+        Args::FetchUser { user, host, token, cool_down_millisecond } => {
+            let users = user;
+            let mut user_info = Vec::with_capacity(users.len());
 
-        last_note = result.iter().min_by_key(|x| x.created_at).map(|x| x.id.clone());
-        println!(r#"{{ "kind": "log", "message": "proceeded by {last_note}"}}"#, last_note = last_note.clone().expect("must be Some").0);
-        println!("{}", serde_json::to_string(&result)?);
+            for user_id in users {
+                let command = UserDetailCommand {
+                    id: user_id
+                };
 
-        let sleep_sec = arg.cool_down_millisecond.map(|x| x.get() / 1000).unwrap_or(0) as u64;
-        let sleep_nano = arg.cool_down_millisecond.map(|x| x.get() as u64 - sleep_sec * 1000).unwrap_or(0) as u32 * 1_000_000;
-        println!(r#"{{ "kind": "log", "message": "sleep" }}"#);
-        sleep(Duration::new(sleep_sec, sleep_nano)).await;
+                let result = command.send(&client, host.clone(), &token).await?;
+
+                println!("{}", serde_json::to_string(&result)?);
+
+                user_info.push(result);
+                let sleep_sec = cool_down_millisecond.map(|x| x.get() / 1000).unwrap_or(0) as u64;
+                let sleep_nano = cool_down_millisecond.map(|x| x.get() as u64 - sleep_sec * 1000).unwrap_or(0) as u32 * 1_000_000;
+                println!(r#"{{ "kind": "log", "message": "sleep" }}"#);
+                sleep(Duration::new(sleep_sec, sleep_nano)).await;
+            }
+        }
     }
 
     Ok(())
+}
+
+#[derive(Eq, PartialEq, Serialize)]
+struct UserDetailCommand {
+    id: UserId,
+}
+
+#[derive(Serialize, Deserialize)]
+struct DetailedUser {
+    id: UserId,
+    #[serde(rename = "name")]
+    screen_name: String,
+    #[serde(rename = "username")]
+    mention: String,
+    #[serde(rename = "isBot")]
+    is_bot: bool,
+    #[serde(rename = "isCat")]
+    is_cat: bool,
+    #[serde(rename = "avatarUrl")]
+    /// 現在のアイコンのURL
+    icon_url: Url,
+}
+
+impl UserDetailCommand {
+    async fn send(self, http_client: &Client, host: String, misskey_token: &MisskeyAuthorizationToken) -> Result<DetailedUser, Box<dyn Error + Send + Sync>> {
+        let wtr = WithTokenRef {
+            token: misskey_token,
+            body: self,
+        };
+        eprintln!("{}", serde_json::to_string(&wtr).unwrap());
+        let x = http_client.request(Method::POST, format!("https://{host}/api/users/show"))
+            .json(&wtr)
+            .send()
+            .await?;
+        let status = x.status();
+        let text = x.text().await?;
+
+        let json = match serde_path_to_error::deserialize(&mut serde_json::de::Deserializer::from_str(&text)) {
+            Ok(x) => x,
+            Err(e) => {
+                eprintln!("ERROR: deserialize failed.");
+                eprintln!("raw: {text}", text = text);
+                eprintln!("status: {status}");
+                panic!("{e:?}");
+            }
+        };
+        Ok(json)
+    }
 }
 
 #[cfg(test)]
