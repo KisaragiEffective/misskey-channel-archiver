@@ -80,6 +80,9 @@ struct Args {
     /// どこから遡るか。ない場合は実行時点の最新のノートから。
     before: Option<NoteId>,
     #[clap(long)]
+    /// どこまで遡るか。ない場合は実行時点の最古のノートまで。
+    after: Option<NoteId>,
+    #[clap(long)]
     host: String,
     #[clap(long)]
     token: MisskeyAuthorizationToken,
