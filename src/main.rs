@@ -123,7 +123,7 @@ impl ChannelTimelineCommand {
         let status = x.status();
         let text = x.text().await?;
 
-        let json = match serde_json::from_str(&text) {
+        let json = match serde_path_to_error::deserialize(&mut serde_json::de::Deserializer::from_str(&text)) {
             Ok(x) => x,
             Err(e) => {
                 eprintln!("ERROR: deserialize failed.");
@@ -145,7 +145,8 @@ struct Note {
     #[serde(rename = "createdAt")]
     created_at: DateTime<Utc>,
     user: PartialUser,
-    text: MisskeyFlavoredMarkdown,
+    /// 本文。RNなら[`None`]。QRNなら引用先の文。
+    text: Option<MisskeyFlavoredMarkdown>,
     /// CWの折りたたみ時に表示されるテキスト
     #[serde(rename = "cw")]
     spoiler_disclaimer_text: Option<String>,
