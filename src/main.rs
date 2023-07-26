@@ -12,6 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use chrono::{DateTime, Utc};
 use clap::Parser;
+use lazy_regex::Lazy;
+use regex_lite::Regex;
 use reqwest::Client;
 use serde::{Serialize, Deserialize, Deserializer, Serializer};
 use serde::de::{Error as _};
@@ -166,32 +168,56 @@ struct PartialUser {
 }
 
 #[derive(Eq, PartialEq, Hash)]
-struct CanonicalEmojiKey {
-    name: EmojiName,
-    host: LocalOnly,
+enum CanonicalEmojiKey {
+    Unicode {
+        utf8: String,
+    },
+    Custom {
+        name: EmojiName,
+        host: LocalOnly,
+    }
 }
 
 impl<'de> Deserialize<'de> for CanonicalEmojiKey {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
-        let pattern = regex_lite::Regex::new(r#"^:([a-z0-9_]+)@\.:$"#).expect("this pattern should be valid");
-
         let raw = String::deserialize(deserializer)?;
-        let m = pattern.captures(&raw).ok_or(serde::de::Error::custom("should be match"))?;
-        let name_range = m.get(1).expect("should be match").range();
-        // TODO: おそらくこの再アロケーションは避けられる
-        let name = EmojiName(raw[name_range].to_owned());
+        // ヒント: もしこれがエラーに見えているならIntelliJがおかしい
+        static PAT: Lazy<lazy_regex::Regex> = lazy_regex::lazy_regex!(r#"^:([a-z0-9_]+)@\.:$"#);
 
-        Ok(CanonicalEmojiKey {
-            name,
-            host: LocalOnly,
-        })
+        if let Some(captures) = PAT.captures(&raw) {
+            let m = captures;
+            let name_range = m.get(1).expect("should be match").range();
+            // TODO: おそらくこの再アロケーションは避けられる
+            let name = EmojiName(raw[name_range].to_owned());
+
+            Ok(CanonicalEmojiKey::Custom {
+                name,
+                host: LocalOnly,
+            })
+        } else {
+            // 絵文字は単にUnicodeの「文字」であることもある
+            emojis::iter().find(|x| x.as_str() == &raw).ok_or(
+                serde::de::Error::custom("emoji repr must match custom emoji or an Unicode codepoint of emoji")
+            ).map(|found| {
+                CanonicalEmojiKey::Unicode {
+                    utf8: found.to_string()
+                }
+            })
+        }
     }
 }
 
 impl Serialize for CanonicalEmojiKey {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
-        let s = format!(":{name}@.:", name = &self.name.0);
-        serializer.serialize_str(&s)
+        match self {
+            CanonicalEmojiKey::Unicode { utf8 } => {
+                serializer.serialize_str(&utf8)
+            }
+            CanonicalEmojiKey::Custom { name, .. } => {
+                let s = format!(":{}@.:", name.0);
+                serializer.serialize_str(&s)
+            }
+        }
     }
 }
 
