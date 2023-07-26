@@ -267,7 +267,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
             channel_id: arg.channel_id.clone(),
             limit: 60.try_into().unwrap(),
             note_after: None,
-            note_before: None,
+            note_before: last_note.clone(),
             date_after: None,
             date_before: None,
         };
@@ -279,7 +279,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
         }
 
         last_note = result.iter().min_by_key(|x| x.created_at).map(|x| x.id.clone());
-        println!(r#"{{ "kind": "log", "message": "proceeded by {last_note}"}}"#, last_note = last_note.expect("must be Some").0);
+        println!(r#"{{ "kind": "log", "message": "proceeded by {last_note}"}}"#, last_note = last_note.clone().expect("must be Some").0);
         println!("{}", serde_json::to_string(&result)?);
 
         let sleep_sec = arg.cool_down_millisecond.map(|x| x.get() / 1000).unwrap_or(0) as u64;
