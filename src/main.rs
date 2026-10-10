@@ -12,8 +12,6 @@ use std::str::FromStr;
 use std::time::Duration;
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use lazy_regex::Lazy;
-
 use reqwest::{Client, Method, Request, RequestBuilder};
 use url::Url;
 use serde::{Serialize, Deserialize, Deserializer, Serializer};
@@ -209,9 +207,7 @@ impl<'de> Deserialize<'de> for CanonicalEmojiKey {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         let raw = String::deserialize(deserializer)?;
         // ヒント: もしこれがエラーに見えているならIntelliJがおかしい
-        static PAT: Lazy<lazy_regex::Regex> = lazy_regex::lazy_regex!(r#"^:([a-z0-9_-]+)@\.:$"#);
-
-        if let Some(captures) = PAT.captures(&raw) {
+        if let Some(captures) = regex::regex!(r#"^:([a-z0-9_-]+)@\.:$"#).captures(&raw) {
             let m = captures;
             let name_range = m.get(1).expect("should be match").range();
             // TODO: おそらくこの再アロケーションは避けられる
@@ -390,6 +386,7 @@ impl UserDetailCommand {
 #[cfg(test)]
 mod tests {
     use crate::MisskeyAuthorizationToken;
+    use crate::{CanonicalEmojiKey, EmojiName, LocalOnly};
 
     #[test]
     fn do_not_leak_token_from_debug_impl() {
@@ -398,5 +395,18 @@ mod tests {
         let debug_str = format!("{token:?}");
 
         assert!(!debug_str.contains(TOKEN));
+    }
+
+    #[test]
+    fn deserialize_custom_emoji_key() {
+        let key: CanonicalEmojiKey = serde_json::from_str(r#"":sample_emoji@.:""#).unwrap();
+
+        assert!(matches!(
+            key,
+            CanonicalEmojiKey::Custom {
+                name: EmojiName(name),
+                host: LocalOnly,
+            } if name == "sample_emoji"
+        ));
     }
 }
