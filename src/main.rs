@@ -1,20 +1,35 @@
-#![deny(clippy::all)]
+#![deny(clippy::all, unused)]
 #![warn(clippy::pedantic, clippy::nursery)]
+// 以下の警告を抑制するために、`#![forbid(unused)]` とはしない。
+// ```
+// warning: allow(unused_attributes) incompatible with previous forbid
+//    --> src/main.rs:155:10
+//     |
+//   3 | #![forbid(unsafe_code, unused)]
+//     |                        ------ `forbid` level set here
+// ...
+// 155 | #[derive(Deserialize, Serialize)]
+//     |          ^^^^^^^^^^^ overruled by previous forbid
+//     |
+//     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+//     = note: for more information, see issue #81670 <https://github.com/rust-lang/rust/issues/81670>
+//     = note: this warning originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
+// ```
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::error::Error;
-use std::fmt::{Debug, Formatter, Write};
+use std::fmt::{Debug, Formatter};
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 
-use std::time::Duration;
 use chrono::{DateTime, Utc};
 use clap::Parser;
-use reqwest::{Client, Method, Request, RequestBuilder};
+use reqwest::{Client, Method};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::time::Duration;
 use url::Url;
-use serde::{Serialize, Deserialize, Deserializer, Serializer};
 
 use tokio::time::sleep;
 
@@ -52,12 +67,6 @@ impl FromStr for UserId {
 }
 #[derive(Eq, PartialEq, Clone, Serialize)]
 struct MisskeyAuthorizationToken(String);
-
-impl MisskeyAuthorizationToken {
-    fn leak(self) -> String {
-        self.0
-    }
-}
 
 impl Debug for MisskeyAuthorizationToken {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -189,7 +198,6 @@ struct PartialUser {
 
 #[derive(Eq, PartialEq, Hash)]
 enum CanonicalEmojiKey {
-    SingleCodepointPunctuation(char),
     BoxedSingleDigit {
         digit: u8,
     },
@@ -243,9 +251,6 @@ impl Serialize for CanonicalEmojiKey {
                 let s = format!(":{}@.:", name.0);
                 serializer.serialize_str(&s)
             }
-            Self::SingleCodepointPunctuation(c) => {
-                serializer.serialize_char(*c)
-            }
             Self::BoxedSingleDigit { digit } => {
                 serializer.serialize_str(&format!("{digit}\u{20e3}"))
             }
@@ -275,7 +280,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
 
     match arg {
         Args::Archive { before, after, host, token, channel_id, cool_down_millisecond } => {
-            let mut last_note = None;
+            let mut last_note;
 
             let mut users = HashSet::with_capacity(100);
 
@@ -284,7 +289,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
                     channel_id: channel_id.clone(),
                     limit: 60.try_into().unwrap(),
                     note_after: after.clone(),
-                    note_before: last_note.clone(),
+                    note_before: before.clone(),
                     date_after: None,
                     date_before: None,
                 };
