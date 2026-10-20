@@ -1,4 +1,4 @@
-#![deny(clippy::all, unused)]
+#![deny(clippy::all, clippy::collection_is_never_read, unused)]
 #![warn(clippy::pedantic, clippy::nursery)]
 // 以下の警告を抑制するために、`#![forbid(unused)]` とはしない。
 // ```
@@ -15,9 +15,9 @@
 //     = note: for more information, see issue #81670 <https://github.com/rust-lang/rust/issues/81670>
 //     = note: this warning originates in the derive macro `Deserialize` (in Nightly builds, run with -Z macro-backtrace for more info)
 // ```
-#![forbid(unsafe_code)]
+#![forbid(unsafe_code, renamed_and_removed_lints)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::{Debug, Formatter};
@@ -155,7 +155,7 @@ impl ChannelTimelineCommand {
             Ok(x) => x,
             Err(e) => {
                 eprintln!("ERROR: deserialize failed.");
-                eprintln!("raw: {text}", text = text);
+                eprintln!("raw: {text}");
                 eprintln!("status: {status}");
                 panic!("{e:?}");
             }
@@ -214,18 +214,18 @@ enum CanonicalEmojiKey {
 impl<'de> Deserialize<'de> for CanonicalEmojiKey {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
         let raw = String::deserialize(deserializer)?;
+        // これを if_let_else で書くと逆に複雑になる。保留。
+        #[expect(clippy::option_if_let_else)]
         // ヒント: もしこれがエラーに見えているならIntelliJがおかしい
-        if let Some(captures) = regex::regex!(r#"^:([a-z0-9_-]+)@\.:$"#).captures(&raw) {
-            let m = captures;
-            let name_range = m.get(1).expect("should be match").range();
-            // TODO: おそらくこの再アロケーションは避けられる
-            let name = EmojiName(raw[name_range].to_owned());
+        if let Some(captures) = regex::regex!(r"^:([a-z0-9_-]+)@\.:$").captures(&raw) {
+            let name = captures.get(1).unwrap().as_str().to_owned();
+            let name = EmojiName(name);
 
             Ok(Self::Custom {
                 name,
                 host: LocalOnly,
             })
-        } else if let Some(emoji) = emojis::iter().find(|x| x.as_str() == &raw) {
+        } else if let Some(emoji) = emojis::iter().find(|x| x.as_str() == raw) {
             // 絵文字は単にUnicodeの「文字」であることもある
             Ok(Self::Unicode {
                 utf8: emoji.to_string()
@@ -255,7 +255,7 @@ impl Serialize for CanonicalEmojiKey {
                 serializer.serialize_str(&format!("{digit}\u{20e3}"))
             }
             Self::Uncategorized(s) => {
-                serializer.serialize_str(&s)
+                serializer.serialize_str(s)
             }
         }
     }
@@ -282,8 +282,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
         Args::Archive { before, after, host, token, channel_id, cool_down_millisecond } => {
             let mut last_note;
 
-            let mut users = HashSet::with_capacity(100);
-
             loop {
                 let send = ChannelTimelineCommand {
                     channel_id: channel_id.clone(),
@@ -303,19 +301,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
                 last_note = result.iter().min_by_key(|x| x.created_at).map(|x| x.id.clone());
                 println!(r#"{{ "kind": "log", "message": "proceeded by {last_note}"}}"#, last_note = last_note.clone().expect("must be Some").0);
                 println!("{}", serde_json::to_string(&result)?);
-                users.extend(result.into_iter().map(|n| n.user.id));
 
-                let sleep_sec = cool_down_millisecond.map(|x| x.get() / 1000).unwrap_or(0) as u64;
-                let sleep_nano = cool_down_millisecond.map(|x| x.get() as u64 - sleep_sec * 1000).unwrap_or(0) as u32 * 1_000_000;
                 println!(r#"{{ "kind": "log", "message": "sleep" }}"#);
-                sleep(Duration::new(sleep_sec, sleep_nano)).await;
+                sleep(Duration::from_millis(cool_down_millisecond.map_or_else(|| 0, |x| x.get() as u64))).await;
             }
         }
         Args::FetchUser { user, host, token, cool_down_millisecond } => {
-            let users = user;
-            let mut user_info = Vec::with_capacity(users.len());
-
-            for user_id in users {
+            for user_id in user {
                 let command = UserDetailCommand {
                     id: user_id
                 };
@@ -324,11 +316,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>>{
 
                 println!("{}", serde_json::to_string(&result)?);
 
-                user_info.push(result);
-                let sleep_sec = cool_down_millisecond.map(|x| x.get() / 1000).unwrap_or(0) as u64;
-                let sleep_nano = cool_down_millisecond.map(|x| x.get() as u64 - sleep_sec * 1000).unwrap_or(0) as u32 * 1_000_000;
                 println!(r#"{{ "kind": "log", "message": "sleep" }}"#);
-                sleep(Duration::new(sleep_sec, sleep_nano)).await;
+                sleep(Duration::from_millis(cool_down_millisecond.map_or_else(|| 0, |x| x.get() as u64))).await;
             }
         }
     }
@@ -379,7 +368,7 @@ impl UserDetailCommand {
             Ok(x) => x,
             Err(e) => {
                 eprintln!("ERROR: deserialize failed.");
-                eprintln!("raw: {text}", text = text);
+                eprintln!("raw: {text}");
                 eprintln!("status: {status}");
                 panic!("{e:?}");
             }
