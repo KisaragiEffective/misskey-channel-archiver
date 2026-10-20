@@ -143,7 +143,7 @@ impl ChannelTimelineCommand {
             token: misskey_token,
             body: self,
         };
-        eprintln!("{}", serde_json::to_string(&wtr).unwrap());
+        eprintln!("{{ \"kind\": \"debug_token\", \"value\": \"masked\" }}");
         let x = http_client.request(Method::POST, format!("https://{host}/api/channels/timeline"))
             .json(&wtr)
             .send()
