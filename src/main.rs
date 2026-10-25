@@ -230,11 +230,8 @@ impl<'de> Deserialize<'de> for CanonicalEmojiKey {
             Ok(Self::Unicode {
                 utf8: emoji.to_string()
             })
-        } else if raw.chars().next().expect("must not be empty").is_ascii_digit() && raw.chars().nth(1).expect("ow") == '\u{20e3}' {
-            Ok(Self::BoxedSingleDigit {
-                // Unicodeでは0-9は一列に並んでいるのでオフセットは引き算するだけで求められる
-                digit: u8::try_from(raw.chars().next().expect("1") as u32 - '0' as u32).expect("oops"),
-            })
+        } else if let Some(digit) = Self::extract_capped_key_number_value(&raw) {
+            Ok(Self::BoxedSingleDigit { digit })
         } else {
             Ok(Self::Uncategorized(raw))
         }
@@ -257,6 +254,36 @@ impl Serialize for CanonicalEmojiKey {
             Self::Uncategorized(s) => {
                 serializer.serialize_str(s)
             }
+        }
+    }
+}
+
+impl CanonicalEmojiKey {
+    fn extract_capped_key_number_value(raw: &str) -> Option<u8> {
+        let mut chars = raw.chars();
+        let digit_char = chars.next()?;
+        if !digit_char.is_ascii_digit() {
+            return None
+        }
+
+        let second_char = chars.next()?;
+
+        let terminating_char = if second_char == '\u{FE0F}' {
+            chars.next()?
+        } else {
+            second_char
+        };
+
+        if terminating_char != '\u{20E3}' {
+            return None
+        }
+
+        if chars.next().is_none() {
+            // Unicodeでは0-9は一列に並んでいるのでオフセットは引き算するだけで求められる
+            u8::try_from(digit_char as u32 - '0' as u32).ok()
+        } else {
+            // excess characters following
+            None
         }
     }
 }
@@ -402,5 +429,69 @@ mod tests {
                 host: LocalOnly,
             } if name == "sample_emoji"
         ));
+    }
+
+    mod extract_capped_key_number_value {
+        use crate::CanonicalEmojiKey;
+        const UNICODE_FE0F: char = '\u{FE0F}';
+        const UNICODE_20E3: char = '\u{20E3}';
+
+        #[test]
+        fn rejects_empty_string() {
+            assert_eq!(CanonicalEmojiKey::extract_capped_key_number_value(""), None);
+        }
+
+        #[test]
+        fn rejects_simple_ascii_digit() {
+            for sub in b'0'..=b'9' {
+                let bytes = &[sub];
+                let s = std::str::from_utf8(bytes).expect("infallible");
+                assert_eq!(CanonicalEmojiKey::extract_capped_key_number_value(s), None);
+            }
+        }
+
+        #[test]
+        fn accepts_capped_key_digit_two_codepoints() {
+            for sub in '0'..='9' {
+                let s = &[sub, UNICODE_20E3].into_iter().collect::<String>();
+                assert_eq!(
+                    CanonicalEmojiKey::extract_capped_key_number_value(s),
+                    Some(sub as u8 - '0' as u8)
+                );
+            }
+        }
+
+        #[test]
+        fn rejects_excess_characters_after_two_codepoints() {
+            for sub in '0'..='9' {
+                let s = &[sub, UNICODE_20E3, 'a', 'b', 'c'].into_iter().collect::<String>();
+                assert_eq!(
+                    CanonicalEmojiKey::extract_capped_key_number_value(s),
+                    None
+                );
+            }
+        }
+
+        #[test]
+        fn accepts_capped_key_digit_three_codepoints() {
+            for sub in '0'..='9' {
+                let s = &[sub, UNICODE_FE0F, UNICODE_20E3].into_iter().collect::<String>();
+                assert_eq!(
+                    CanonicalEmojiKey::extract_capped_key_number_value(s),
+                    Some(sub as u8 - '0' as u8)
+                );
+            }
+        }
+
+        #[test]
+        fn rejects_excess_characters_after_three_codepoints() {
+            for sub in '0'..='9' {
+                let s = &[sub, UNICODE_FE0F, UNICODE_20E3, 'a', 'b', 'c'].into_iter().collect::<String>();
+                assert_eq!(
+                    CanonicalEmojiKey::extract_capped_key_number_value(s),
+                    None
+                );
+            }
+        }
     }
 }
