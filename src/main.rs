@@ -33,6 +33,9 @@ use url::Url;
 
 use tokio::time::sleep;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize)]
 struct NoteId(String);
 
@@ -230,11 +233,8 @@ impl<'de> Deserialize<'de> for CanonicalEmojiKey {
             Ok(Self::Unicode {
                 utf8: emoji.to_string()
             })
-        } else if raw.chars().next().expect("must not be empty").is_ascii_digit() && raw.chars().nth(1).expect("ow") == '\u{20e3}' {
-            Ok(Self::BoxedSingleDigit {
-                // Unicodeでは0-9は一列に並んでいるのでオフセットは引き算するだけで求められる
-                digit: u8::try_from(raw.chars().next().expect("1") as u32 - '0' as u32).expect("oops"),
-            })
+        } else if let Some(digit) = Self::extract_capped_key_number_value(&raw) {
+            Ok(Self::BoxedSingleDigit { digit })
         } else {
             Ok(Self::Uncategorized(raw))
         }
@@ -257,6 +257,36 @@ impl Serialize for CanonicalEmojiKey {
             Self::Uncategorized(s) => {
                 serializer.serialize_str(s)
             }
+        }
+    }
+}
+
+impl CanonicalEmojiKey {
+    fn extract_capped_key_number_value(raw: &str) -> Option<u8> {
+        let mut chars = raw.chars();
+        let digit_char = chars.next()?;
+        if !digit_char.is_ascii_digit() {
+            return None
+        }
+
+        let second_char = chars.next()?;
+
+        let terminating_char = if second_char == '\u{FE0F}' {
+            chars.next()?
+        } else {
+            second_char
+        };
+
+        if terminating_char != '\u{20E3}' {
+            return None
+        }
+
+        if chars.next().is_none() {
+            // Unicodeでは0-9は一列に並んでいるのでオフセットは引き算するだけで求められる
+            u8::try_from(digit_char as u32 - '0' as u32).ok()
+        } else {
+            // excess characters following
+            None
         }
     }
 }
@@ -374,33 +404,5 @@ impl UserDetailCommand {
             }
         };
         Ok(json)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::MisskeyAuthorizationToken;
-    use crate::{CanonicalEmojiKey, EmojiName, LocalOnly};
-
-    #[test]
-    fn do_not_leak_token_from_debug_impl() {
-        const TOKEN: &str = "sometokenhere";
-        let token = MisskeyAuthorizationToken(TOKEN.to_string());
-        let debug_str = format!("{token:?}");
-
-        assert!(!debug_str.contains(TOKEN));
-    }
-
-    #[test]
-    fn deserialize_custom_emoji_key() {
-        let key: CanonicalEmojiKey = serde_json::from_str(r#"":sample_emoji@.:""#).unwrap();
-
-        assert!(matches!(
-            key,
-            CanonicalEmojiKey::Custom {
-                name: EmojiName(name),
-                host: LocalOnly,
-            } if name == "sample_emoji"
-        ));
     }
 }
